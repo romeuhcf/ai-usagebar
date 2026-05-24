@@ -8,6 +8,7 @@
 //! The two binaries (`ai-usagebar` and `ai-usagebar-tui`) are thin: they parse
 //! CLI args, instantiate vendors, and hand off to a renderer in this crate.
 
+pub mod active;
 pub mod anthropic;
 pub mod cache;
 pub mod config;
@@ -19,6 +20,7 @@ pub mod openrouter;
 pub mod pacing;
 pub mod pango;
 pub mod theme;
+pub mod tooltip;
 pub mod tui;
 pub mod usage;
 pub mod vendor;

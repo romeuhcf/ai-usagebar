@@ -22,10 +22,21 @@ use crate::vendor::VendorId;
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
+    pub ui: UiConfig,
     pub anthropic: AnthropicConfig,
     pub openai: OpenAiConfig,
     pub zai: ZaiConfig,
     pub openrouter: OpenRouterConfig,
+}
+
+/// UI / dispatch preferences. Currently just `primary` — which vendor the
+/// widget shows when `--vendor` is omitted, and which TUI tab is selected
+/// at startup.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// `None` → fall back to anthropic for backward compatibility.
+    pub primary: Option<VendorId>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -69,7 +80,11 @@ impl Default for OpenAiConfig {
 #[serde(default)]
 pub struct ZaiConfig {
     pub enabled: bool,
+    /// Env var name to read the key from (env wins over `api_key`).
     pub api_key_env: String,
+    /// Inline key (fallback when the env var is unset). Chmod 600 your
+    /// config file if you put a real key here.
+    pub api_key: Option<String>,
     /// Optional plan tier label (lite/pro/max) — display-only.
     pub plan_tier: Option<String>,
 }
@@ -79,6 +94,7 @@ impl Default for ZaiConfig {
         Self {
             enabled: true,
             api_key_env: "ZAI_API_KEY".to_string(),
+            api_key: None,
             plan_tier: None,
         }
     }
@@ -89,6 +105,7 @@ impl Default for ZaiConfig {
 pub struct OpenRouterConfig {
     pub enabled: bool,
     pub api_key_env: String,
+    pub api_key: Option<String>,
 }
 
 impl Default for OpenRouterConfig {
@@ -96,8 +113,35 @@ impl Default for OpenRouterConfig {
         Self {
             enabled: true,
             api_key_env: "OPENROUTER_API_KEY".to_string(),
+            api_key: None,
         }
     }
+}
+
+/// Resolve an API key for a vendor: env var wins, then inline config, then
+/// a clear error naming both fields. Used by Z.AI and OpenRouter vendors.
+pub fn resolve_api_key(
+    vendor_label: &str,
+    env_var_name: &str,
+    inline: Option<&str>,
+) -> crate::error::Result<String> {
+    if !env_var_name.is_empty() {
+        if let Ok(v) = std::env::var(env_var_name) {
+            if !v.is_empty() {
+                return Ok(v);
+            }
+        }
+    }
+    if let Some(v) = inline {
+        if !v.is_empty() {
+            return Ok(v.to_string());
+        }
+    }
+    Err(crate::error::AppError::Credentials(format!(
+        "{vendor_label}: no API key. Either export {env_var_name} or set \
+         `api_key` under [{}] in ~/.config/ai-usagebar/config.toml (chmod 600).",
+        vendor_label.to_lowercase()
+    )))
 }
 
 impl Config {
@@ -217,6 +261,81 @@ enabled = false
     fn malformed_toml_returns_error() {
         let f = write_toml("this is not = = valid");
         assert!(Config::load_from(f.path()).is_err());
+    }
+
+    // serial guard for env-var manipulation tests so they don't race
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static M: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        M.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn resolve_api_key_prefers_env_over_inline() {
+        let _g = env_guard();
+        // Use a unique env var name so we don't clobber test parallelism.
+        let var = "AI_USAGEBAR_TEST_ENV_WINS";
+        // SAFETY: tests are single-threaded under env_guard.
+        unsafe { std::env::set_var(var, "from-env") };
+        let got = resolve_api_key("Zai", var, Some("from-inline")).unwrap();
+        unsafe { std::env::remove_var(var) };
+        assert_eq!(got, "from-env");
+    }
+
+    #[test]
+    fn resolve_api_key_falls_back_to_inline() {
+        let _g = env_guard();
+        let var = "AI_USAGEBAR_TEST_INLINE_FALLBACK";
+        unsafe { std::env::remove_var(var) };
+        let got = resolve_api_key("Zai", var, Some("inline-key")).unwrap();
+        assert_eq!(got, "inline-key");
+    }
+
+    #[test]
+    fn resolve_api_key_errors_when_both_missing() {
+        let _g = env_guard();
+        let var = "AI_USAGEBAR_TEST_BOTH_MISSING";
+        unsafe { std::env::remove_var(var) };
+        let err = resolve_api_key("Zai", var, None).unwrap_err();
+        match err {
+            crate::error::AppError::Credentials(msg) => {
+                assert!(msg.contains(var), "error should name env var: {msg}");
+                assert!(msg.contains("api_key"), "error should suggest config field: {msg}");
+            }
+            other => panic!("expected Credentials error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolve_api_key_treats_empty_env_as_unset() {
+        let _g = env_guard();
+        let var = "AI_USAGEBAR_TEST_EMPTY_ENV";
+        unsafe { std::env::set_var(var, "") };
+        let got = resolve_api_key("OpenRouter", var, Some("inline")).unwrap();
+        unsafe { std::env::remove_var(var) };
+        assert_eq!(got, "inline");
+    }
+
+    #[test]
+    fn config_parses_with_inline_api_key_and_primary() {
+        let f = write_toml(
+            r#"
+            [ui]
+            primary = "openrouter"
+
+            [zai]
+            enabled = true
+            api_key_env = "MY_ZAI"
+            api_key = "sk-zai-inline"
+
+            [openrouter]
+            enabled = true
+            api_key = "sk-or-inline"
+            "#,
+        );
+        let c = Config::load_from(f.path()).unwrap();
+        assert_eq!(c.ui.primary, Some(VendorId::Openrouter));
+        assert_eq!(c.zai.api_key.as_deref(), Some("sk-zai-inline"));
+        assert_eq!(c.openrouter.api_key.as_deref(), Some("sk-or-inline"));
     }
 
     #[test]

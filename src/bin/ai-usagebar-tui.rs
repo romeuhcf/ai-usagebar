@@ -45,7 +45,7 @@ async fn run() -> io::Result<()> {
         .build()
         .map_err(io::Error::other)?;
 
-    let mut app = App::new(vendors);
+    let mut app = App::new_with_primary(vendors, config.ui.primary);
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

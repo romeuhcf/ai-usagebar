@@ -3,10 +3,11 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
 
-use crate::tui::app::{App, TabState};
+use crate::tui::app::App;
+use crate::tui::panels;
 use crate::vendor::VendorId;
 
 pub fn draw(f: &mut Frame, app: &App) {
@@ -75,37 +76,22 @@ fn draw_tabs(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn draw_body(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let body: Text = match app.tabs.get(app.active) {
-        Some(TabState::Loading) => Text::from(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Loading…",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ]),
-        Some(TabState::Ready { tooltip_pango, .. }) => {
-            crate::tui::pango::to_text(tooltip_pango)
-        }
-        Some(TabState::Error(e)) => Text::from(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("  Error: {e}"),
-                Style::default().fg(Color::Red),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Press `r` to retry, `q` to quit.",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ]),
-        None => Text::from(""),
-    };
-
     let block = Block::default()
         .borders(Borders::LEFT | Borders::RIGHT)
         .border_style(Style::default().fg(accent(&app.theme)));
-    let para = Paragraph::new(body).block(block);
-    f.render_widget(para, area);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let Some(tab) = app.tabs.get(app.active) else {
+        return;
+    };
+    let vendor = app
+        .vendors
+        .get(app.active)
+        .copied()
+        .unwrap_or(VendorId::Anthropic);
+    let sections = panels::sections_for(vendor, tab, chrono::Utc::now(), 5);
+    panels::render(f, inner, &app.theme, &sections);
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {

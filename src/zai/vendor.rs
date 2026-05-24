@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 
 use crate::countdown;
 use crate::format::{placeholders, substitute};
-use crate::openrouter::vendor::{TooltipLine, render_bordered};
+use crate::tooltip::{Line as TooltipLine, render_bordered};
 use crate::pacing::PaceSeverity;
 use crate::pango::{self, color_span, escape, severity_color, severity_for};
 use crate::theme::Theme;
@@ -30,6 +30,7 @@ pub fn build_placeholders(
     let mcp_pct = snap.mcp.as_ref().map(|w| w.utilization_pct).unwrap_or(0);
     placeholders(vec![
         ("icon", "󰚩".to_string()),
+        ("vendor_short", "zai".to_string()),
         ("zai_plan", snap.plan.clone()),
         ("zai_session_pct", session_pct.to_string()),
         (

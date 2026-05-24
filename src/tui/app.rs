@@ -5,21 +5,30 @@ use std::time::Duration;
 use chrono::Utc;
 use reqwest::Client;
 
-use crate::cache::{Cache, DEFAULT_TTL};
+use crate::cache::DEFAULT_TTL;
 use crate::config::Config;
 use crate::error::Result;
 use crate::theme::Theme;
-use crate::vendor::{RenderOpts, VendorId, VendorOutcome};
-use crate::waybar::WaybarOutput;
-use crate::{anthropic, openai, openrouter, zai};
+use crate::vendor::{VendorId, VendorOutcome};
 
-/// What we display per vendor — either a successfully rendered tooltip, or
-/// the error string from a failed fetch.
+/// What we display per vendor — raw snapshot + fetch metadata for native
+/// panel rendering, or an error message when the fetch failed.
+///
+/// `Ready` is boxed because the snapshot is much larger than the other two
+/// variants (silences `clippy::large_enum_variant`).
 #[derive(Debug, Clone)]
 pub enum TabState {
     Loading,
-    Ready { tooltip_pango: String, bar_text_pango: String },
+    Ready(Box<ReadyTab>),
     Error(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct ReadyTab {
+    pub snapshot: crate::usage::VendorSnapshot,
+    pub stale: bool,
+    pub last_error: Option<(u16, String)>,
+    pub cache_age: Option<std::time::Duration>,
 }
 
 #[derive(Debug)]
@@ -45,6 +54,19 @@ impl App {
         }
     }
 
+    /// Construct with an initial active tab — usually `[ui] primary` from
+    /// config. Silently falls through to index 0 if the requested vendor
+    /// isn't in `vendors` (e.g. it was disabled).
+    pub fn new_with_primary(vendors: Vec<VendorId>, primary: Option<VendorId>) -> Self {
+        let mut app = Self::new(vendors);
+        if let Some(p) = primary {
+            if let Some(idx) = app.vendors.iter().position(|v| *v == p) {
+                app.active = idx;
+            }
+        }
+        app
+    }
+
     pub fn active_vendor(&self) -> Option<VendorId> {
         self.vendors.get(self.active).copied()
     }
@@ -66,43 +88,35 @@ impl App {
 pub async fn refresh_one(
     client: &Client,
     config: &Config,
-    theme: &Theme,
+    _theme: &Theme,
     vendor: VendorId,
 ) -> TabState {
-    match fetch_and_render(client, config, theme, vendor).await {
-        Ok(out) => TabState::Ready {
-            tooltip_pango: out.tooltip,
-            bar_text_pango: out.text,
-        },
+    match build_outcome(client, config, vendor).await {
+        Ok(outcome) => TabState::Ready(Box::new(ReadyTab {
+            snapshot: outcome.snapshot,
+            stale: outcome.stale,
+            last_error: outcome.last_error,
+            cache_age: outcome.cache_age,
+        })),
         Err(e) => TabState::Error(e.to_string()),
     }
 }
 
-async fn fetch_and_render(
+async fn build_outcome(
     client: &Client,
     config: &Config,
-    theme: &Theme,
     vendor: VendorId,
-) -> Result<WaybarOutput> {
-    let opts = RenderOpts {
-        format: None,
-        tooltip_format: None,
-        icon: None,
-        pace_tolerance: 5,
-        format_pace_color: false,
-        tooltip_pace_pts: true, // TUI always shows elapsed-position markers
-    };
-    let now = Utc::now();
+) -> Result<VendorOutcome> {
     match vendor {
         VendorId::Anthropic => {
-            let cache = Cache::for_vendor("anthropic")?;
+            let cache = crate::cache::Cache::for_vendor("anthropic")?;
             let creds_path = config
                 .anthropic
                 .credentials_path
                 .clone()
-                .unwrap_or_else(|| anthropic::creds::default_path().unwrap_or_default());
-            let endpoints = anthropic::fetch::Endpoints::default();
-            let outcome = anthropic::fetch_snapshot(
+                .unwrap_or_else(|| crate::anthropic::creds::default_path().unwrap_or_default());
+            let endpoints = crate::anthropic::fetch::Endpoints::default();
+            let outcome = crate::anthropic::fetch_snapshot(
                 client,
                 &creds_path,
                 &cache,
@@ -110,40 +124,33 @@ async fn fetch_and_render(
                 DEFAULT_TTL,
             )
             .await?;
-            let render = crate::widget::render::RenderInput {
-                outcome: &outcome,
-                theme,
-                format: crate::widget::render::DEFAULT_FORMAT,
-                tooltip_format: None,
-                icon: None,
-                pace_tolerance: opts.pace_tolerance,
-                format_pace_color: false,
-                tooltip_pace_pts: opts.tooltip_pace_pts,
-                now,
-            };
-            Ok(crate::widget::render::render_anthropic(&render))
+            Ok(crate::vendor::VendorOutcome {
+                snapshot: crate::usage::VendorSnapshot::Anthropic(outcome.snapshot),
+                stale: outcome.stale,
+                last_error: outcome.last_error,
+                cache_age: outcome.cache_age,
+            })
         }
         VendorId::Openrouter => {
-            let api_key = std::env::var(&config.openrouter.api_key_env).map_err(|_| {
-                crate::error::AppError::Credentials(format!(
-                    "{} not set",
-                    config.openrouter.api_key_env
-                ))
-            })?;
-            let cache = Cache::for_vendor("openrouter")?;
-            let endpoints = openrouter::fetch::Endpoints::default();
-            let outcome = openrouter::fetch_snapshot(client, &api_key, &cache, &endpoints, DEFAULT_TTL).await?;
-            let snap = outcome.snapshot.clone();
-            let vo: VendorOutcome = outcome.into();
-            Ok(openrouter::vendor::render(&vo, &snap, theme, &opts, now))
+            let api_key = crate::config::resolve_api_key(
+                "OpenRouter",
+                &config.openrouter.api_key_env,
+                config.openrouter.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("openrouter")?;
+            let endpoints = crate::openrouter::fetch::Endpoints::default();
+            let outcome = crate::openrouter::fetch_snapshot(client, &api_key, &cache, &endpoints, DEFAULT_TTL).await?;
+            Ok(outcome.into())
         }
         VendorId::Zai => {
-            let api_key = std::env::var(&config.zai.api_key_env).map_err(|_| {
-                crate::error::AppError::Credentials(format!("{} not set", config.zai.api_key_env))
-            })?;
-            let cache = Cache::for_vendor("zai")?;
-            let endpoints = zai::fetch::Endpoints::default();
-            let outcome = zai::fetch_snapshot(
+            let api_key = crate::config::resolve_api_key(
+                "Zai",
+                &config.zai.api_key_env,
+                config.zai.api_key.as_deref(),
+            )?;
+            let cache = crate::cache::Cache::for_vendor("zai")?;
+            let endpoints = crate::zai::fetch::Endpoints::default();
+            let outcome = crate::zai::fetch_snapshot(
                 client,
                 &api_key,
                 &cache,
@@ -152,22 +159,18 @@ async fn fetch_and_render(
                 config.zai.plan_tier.as_deref(),
             )
             .await?;
-            let snap = outcome.snapshot.clone();
-            let vo: VendorOutcome = outcome.into();
-            Ok(zai::vendor::render(&vo, &snap, theme, &opts, now))
+            Ok(outcome.into())
         }
         VendorId::Openai => {
-            let cache = Cache::for_vendor("openai")?;
+            let cache = crate::cache::Cache::for_vendor("openai")?;
             let creds_path = config
                 .openai
                 .codex_auth_path
                 .clone()
-                .unwrap_or_else(|| openai::creds::default_path().unwrap_or_default());
-            let endpoints = openai::fetch::Endpoints::default();
-            let outcome = openai::fetch_snapshot(client, &creds_path, &cache, &endpoints, DEFAULT_TTL).await?;
-            let snap = outcome.snapshot.clone();
-            let vo: VendorOutcome = outcome.into();
-            Ok(openai::vendor::render(&vo, &snap, theme, &opts, now))
+                .unwrap_or_else(|| crate::openai::creds::default_path().unwrap_or_default());
+            let endpoints = crate::openai::fetch::Endpoints::default();
+            let outcome = crate::openai::fetch_snapshot(client, &creds_path, &cache, &endpoints, DEFAULT_TTL).await?;
+            Ok(outcome.into())
         }
     }
 }

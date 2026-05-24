@@ -1,6 +1,6 @@
 [package]
 name = "ai-usagebar"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.86"
 license = "MIT"
@@ -30,11 +30,8 @@ fs2 = "0.4"
 tempfile = "3"
 directories = "5"
 thiserror = "2"
-anyhow = "1"
 async-trait = "0.1"
 base64 = "0.22"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ratatui = "0.29"
 crossterm = "0.28"
 

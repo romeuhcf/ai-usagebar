@@ -24,9 +24,11 @@ Output modes:
   - --json: force JSON output even when stdout is a TTY (for scripting)."
 )]
 pub struct Cli {
-    /// Which vendor to query. Phase 2 only supports `anthropic`.
-    #[arg(long, value_enum, default_value_t = Vendor::Anthropic)]
-    pub vendor: Vendor,
+    /// Which vendor to query. When omitted, reads `[ui] primary` from
+    /// `~/.config/ai-usagebar/config.toml`; falls back to `anthropic` if
+    /// neither is set.
+    #[arg(long, value_enum)]
+    pub vendor: Option<Vendor>,
 
     /// Optional icon prepended to the bar text (Nerd Font glyph / emoji /
     /// Pango span). claudebar `--icon`.
@@ -86,6 +88,17 @@ pub struct Cli {
     #[arg(long, value_name = "SECS")]
     pub watch: Option<u64>,
 
+    /// Cycle the persisted "active vendor" forward and exit. Wire to
+    /// Waybar's `on-scroll-up` to scroll-cycle through enabled vendors.
+    /// Sends SIGRTMIN+13 to waybar afterwards so the bar refreshes
+    /// immediately rather than waiting for the next interval tick.
+    #[arg(long, conflicts_with_all = ["cycle_prev", "watch", "pretty", "json"])]
+    pub cycle_next: bool,
+
+    /// Cycle backwards. Wire to `on-scroll-down`.
+    #[arg(long, conflicts_with_all = ["cycle_next", "watch", "pretty", "json"])]
+    pub cycle_prev: bool,
+
     /// Override the cache directory (for tests / debugging).
     #[arg(long, hide = true)]
     pub cache_dir: Option<std::path::PathBuf>,
@@ -115,6 +128,38 @@ impl Vendor {
 }
 
 impl Cli {
+    /// Resolve the vendor with full precedence:
+    ///   1. explicit `--vendor` (highest)
+    ///   2. persisted scroll-cycle state (`~/.cache/ai-usagebar/active_vendor`)
+    ///   3. `[ui] primary` from config
+    ///   4. anthropic (lowest)
+    pub fn resolved_vendor(&self, config: &crate::config::Config) -> Vendor {
+        if let Some(v) = self.vendor {
+            return v;
+        }
+        if let Some(id) = crate::active::read() {
+            if config.is_enabled(id) {
+                return id_to_vendor(id);
+            }
+        }
+        match config.ui.primary {
+            Some(id) => id_to_vendor(id),
+            None => Vendor::Anthropic,
+        }
+    }
+}
+
+fn id_to_vendor(id: crate::vendor::VendorId) -> Vendor {
+    match id {
+        crate::vendor::VendorId::Anthropic => Vendor::Anthropic,
+        crate::vendor::VendorId::Openai => Vendor::Openai,
+        crate::vendor::VendorId::Zai => Vendor::Zai,
+        crate::vendor::VendorId::Openrouter => Vendor::Openrouter,
+    }
+}
+
+impl Cli {
+
     /// True when we should emit Waybar JSON. Default behavior: JSON when
     /// stdout is piped, pretty when on a TTY (unless `--json` is set).
     pub fn output_json(&self) -> bool {
@@ -142,7 +187,10 @@ mod tests {
     #[test]
     fn defaults_match_claudebar() {
         let cli = Cli::parse_from(["ai-usagebar"]);
-        assert_eq!(cli.vendor, Vendor::Anthropic);
+        assert_eq!(cli.vendor, None);
+        // Without explicit --vendor and with default config, resolve to anthropic.
+        let cfg = crate::config::Config::default();
+        assert_eq!(cli.resolved_vendor(&cfg), Vendor::Anthropic);
         assert_eq!(cli.pace_tolerance, 5);
         assert!(cli.format.is_none());
         assert!(cli.tooltip_format.is_none());
@@ -152,6 +200,22 @@ mod tests {
         assert!(!cli.pretty);
         assert!(!cli.json);
         assert!(cli.watch.is_none());
+    }
+
+    #[test]
+    fn primary_from_config_wins_when_vendor_unset() {
+        let cli = Cli::parse_from(["ai-usagebar"]);
+        let mut cfg = crate::config::Config::default();
+        cfg.ui.primary = Some(crate::vendor::VendorId::Openrouter);
+        assert_eq!(cli.resolved_vendor(&cfg), Vendor::Openrouter);
+    }
+
+    #[test]
+    fn explicit_vendor_overrides_config_primary() {
+        let cli = Cli::parse_from(["ai-usagebar", "--vendor", "zai"]);
+        let mut cfg = crate::config::Config::default();
+        cfg.ui.primary = Some(crate::vendor::VendorId::Openrouter);
+        assert_eq!(cli.resolved_vendor(&cfg), Vendor::Zai);
     }
 
     #[test]

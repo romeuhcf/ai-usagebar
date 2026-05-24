@@ -118,10 +118,13 @@ pub fn write_back(path: &Path, new_oauth: &OauthCreds) -> Result<()> {
         .and_then(|s| serde_json::from_str(&s).map_err(AppError::Json))
         .unwrap_or_else(|_| serde_json::json!({}));
 
-    if !doc.is_object() {
-        doc = serde_json::json!({});
-    }
-    let obj = doc.as_object_mut().expect("just ensured object");
+    let obj = match doc.as_object_mut() {
+        Some(o) => o,
+        None => {
+            doc = serde_json::json!({});
+            doc.as_object_mut().expect("just constructed object")
+        }
+    };
     obj.insert(
         "claudeAiOauth".into(),
         serde_json::to_value(new_oauth).map_err(AppError::Json)?,

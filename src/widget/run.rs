@@ -25,10 +25,41 @@ use crate::widget::render::{DEFAULT_FORMAT, RenderInput, render_anthropic};
 /// Entry point — runs to completion and ALWAYS returns Ok with exit code 0
 /// in the caller. Mirrors claudebar's `die()` invariant.
 pub async fn run(cli: Cli) -> i32 {
+    // Scroll-cycle short-circuit: don't render, just bump state + signal waybar.
+    if cli.cycle_next || cli.cycle_prev {
+        return run_cycle(&cli).await;
+    }
     if let Some(secs) = cli.watch {
         return run_watch(cli, secs).await;
     }
     run_once(&cli, &mut std::io::stdout()).await;
+    0
+}
+
+/// Cycle to the next/prev enabled vendor and signal waybar to refresh.
+/// Always exits 0 — Waybar swallows non-zero exits anyway.
+async fn run_cycle(cli: &Cli) -> i32 {
+    let config = Config::load().unwrap_or_default();
+    let enabled = config.enabled_vendors();
+    if enabled.is_empty() {
+        return 0;
+    }
+    // Starting point: current persisted vendor, else config.primary, else
+    // anthropic. resolved_vendor() encodes that precedence, minus the
+    // `cli.vendor` override (cycle commands ignore --vendor on purpose).
+    let start = match config.ui.primary {
+        Some(id) if enabled.contains(&id) => id,
+        _ => enabled[0],
+    };
+    let delta = if cli.cycle_next { 1 } else { -1 };
+    let _ = crate::active::cycle(&enabled, start, delta);
+
+    // Refresh the bar immediately. The Waybar module's `signal: 13` setting
+    // means SIGRTMIN+13 re-runs the exec. SIGRTMIN is libc-dependent; the
+    // shell-safe value on Linux glibc is signal 47 (= SIGRTMIN(34)+13).
+    let _ = std::process::Command::new("pkill")
+        .args(["-RTMIN+13", "waybar"])
+        .status();
     0
 }
 
@@ -64,13 +95,14 @@ async fn run_once(cli: &Cli, out: &mut impl Write) {
 
 async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
     let config = Config::load().unwrap_or_default();
-    if !config.is_enabled(cli.vendor.to_id()) {
+    let vendor = cli.resolved_vendor(&config);
+    if !config.is_enabled(vendor.to_id()) {
         return Err(AppError::Other(format!(
             "vendor {:?} is disabled in ~/.config/ai-usagebar/config.toml",
-            cli.vendor
+            vendor
         )));
     }
-    match cli.vendor {
+    match vendor {
         Vendor::Anthropic => anthropic_output(cli).await,
         Vendor::Openrouter => openrouter_output(cli, &config).await,
         Vendor::Openai => openai_output(cli, &config).await,
@@ -116,10 +148,11 @@ async fn openai_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
 }
 
 async fn zai_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
-    let env_var = &config.zai.api_key_env;
-    let api_key = std::env::var(env_var).map_err(|_| {
-        AppError::Credentials(format!("{env_var} not set."))
-    })?;
+    let api_key = crate::config::resolve_api_key(
+        "Zai",
+        &config.zai.api_key_env,
+        config.zai.api_key.as_deref(),
+    )?;
     let client = http_client()?;
     let cache = match cli.cache_dir.as_deref() {
         Some(p) => Cache::at(p.join("zai")),
@@ -162,12 +195,11 @@ async fn zai_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
 }
 
 async fn openrouter_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
-    let env_var = &config.openrouter.api_key_env;
-    let api_key = std::env::var(env_var).map_err(|_| {
-        AppError::Credentials(format!(
-            "{env_var} not set. Export it (e.g. in ~/.config/zsh/secrets) before running."
-        ))
-    })?;
+    let api_key = crate::config::resolve_api_key(
+        "OpenRouter",
+        &config.openrouter.api_key_env,
+        config.openrouter.api_key.as_deref(),
+    )?;
     let client = http_client()?;
     let cache = match cli.cache_dir.as_deref() {
         Some(p) => Cache::at(p.join("openrouter")),

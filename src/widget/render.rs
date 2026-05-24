@@ -12,8 +12,9 @@ use crate::anthropic::fetch::FetchOutcome;
 use crate::countdown;
 use crate::format::{placeholders, substitute};
 use crate::pacing;
-use crate::pango::{self, color_span, escape, severity_for, visible_width};
+use crate::pango::{self, color_span, escape, severity_for};
 use crate::theme::Theme;
+use crate::tooltip::{self, Line};
 use crate::usage::anthropic_severity;
 use crate::waybar::{Class, WaybarOutput};
 
@@ -146,6 +147,7 @@ fn build_placeholders(input: &RenderInput) -> HashMap<&'static str, String> {
 
     let mut v = placeholders(vec![
         ("icon", "󰚩".to_string()),
+        ("vendor_short", "cld".to_string()),
         ("plan", snap.plan.clone()),
         ("session_pct", snap.session.utilization_pct.to_string()),
         ("session_reset", countdown::format(snap.session.resets_at, input.now)),
@@ -284,6 +286,7 @@ fn render_default_tooltip(input: &RenderInput) -> String {
     let weekly_pace_glyph = pick_pace_glyph(input.tooltip_pace_pts, &weekly_pacing);
 
     let mut lines: Vec<Line> = Vec::new();
+    let _ = pango::severity_color; // silence unused-import warning if any
     lines.push(Line::Center(format!(
         "<span font_weight='bold' foreground='{blue}'>Claude {plan}</span>",
         plan = escape(&snap.plan)
@@ -405,7 +408,7 @@ fn render_default_tooltip(input: &RenderInput) -> String {
         " <span foreground='{dim}'>  󰅐  Updated {updated}</span>"
     )));
 
-    render_bordered(&lines, theme)
+    tooltip::render_bordered(&lines, theme)
 }
 
 fn pick_pace_glyph(point_mode: bool, p: &pacing::Pacing) -> &'static str {
@@ -414,68 +417,6 @@ fn pick_pace_glyph(point_mode: bool, p: &pacing::Pacing) -> &'static str {
     } else {
         p.ratio_pace.glyph()
     }
-}
-
-/// One row of the bordered tooltip box.
-enum Line {
-    /// Centered text. The renderer pads both sides equally.
-    Center(String),
-    /// Body text. Left-justified, right-padded to fill the box.
-    Body(String),
-    /// A horizontal separator drawn with `─` characters.
-    Sep,
-}
-
-/// Render the bordered tooltip box (claudebar:802-860). Width is computed
-/// from the widest body/center line so multi-vendor / different-content
-/// snapshots auto-size correctly.
-fn render_bordered(lines: &[Line], theme: &Theme) -> String {
-    let blue = &theme.blue;
-    let dim = &theme.dim;
-
-    // Compute max visible width across body+center lines.
-    let mut max_w: usize = 0;
-    for line in lines {
-        let s = match line {
-            Line::Center(s) | Line::Body(s) => s.as_str(),
-            Line::Sep => continue,
-        };
-        let w = visible_width(s);
-        if w > max_w {
-            max_w = w;
-        }
-    }
-    let inner_w = max_w + 1;
-    let border_h: String = "─".repeat(inner_w);
-    let sep_inner: String = "─".repeat(inner_w.saturating_sub(2));
-    let sep_line = format!(" <span foreground='{dim}'>{sep_inner}</span>");
-
-    let mut out = String::with_capacity(256 * lines.len());
-    out.push_str(&format!("<span foreground='{blue}'>╭{border_h}╮</span>\n"));
-    for line in lines {
-        let body = match line {
-            Line::Body(s) => pad_right(s, inner_w),
-            Line::Center(s) => pad_center(s, inner_w),
-            Line::Sep => pad_right(&sep_line, inner_w),
-        };
-        out.push_str(&format!("<span foreground='{blue}'>│</span>{body}<span foreground='{blue}'>│</span>\n"));
-    }
-    out.push_str(&format!("<span foreground='{blue}'>╰{border_h}╯</span>"));
-    out
-}
-
-fn pad_right(s: &str, inner_w: usize) -> String {
-    let v = visible_width(s);
-    let need = inner_w.saturating_sub(v);
-    format!("{s}{}", " ".repeat(need))
-}
-
-fn pad_center(s: &str, inner_w: usize) -> String {
-    let v = visible_width(s);
-    let total = inner_w.saturating_sub(v);
-    let lp = total / 2;
-    let rp = total - lp;
-    format!("{}{s}{}", " ".repeat(lp), " ".repeat(rp))
 }
 
 /// Greedy word-wrap to a target column. Used for the API-error message

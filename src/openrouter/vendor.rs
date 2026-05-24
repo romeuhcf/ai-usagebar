@@ -6,8 +6,9 @@ use chrono::{DateTime, Utc};
 
 use crate::format::{placeholders, substitute};
 use crate::pacing::PaceSeverity;
-use crate::pango::{self, color_span, escape, severity_color, severity_for, visible_width};
+use crate::pango::{self, color_span, escape, severity_color, severity_for};
 use crate::theme::Theme;
+use crate::tooltip::{Line as TooltipLine, render_bordered};
 use crate::usage::OpenRouterSnapshot;
 use crate::vendor::{RenderOpts, VendorOutcome};
 use crate::waybar::{Class, WaybarOutput};
@@ -22,6 +23,7 @@ pub struct OpenRouterVendor;
 pub fn build_placeholders(snap: &OpenRouterSnapshot, _theme: &Theme) -> HashMap<&'static str, String> {
     placeholders(vec![
         ("icon", "󱙺".to_string()),
+        ("vendor_short", "opr".to_string()),
         ("or_label", snap.label.clone()),
         ("or_balance", format_money(snap.balance())),
         ("or_total", format_money(snap.total_credits)),
@@ -204,61 +206,6 @@ fn render_tooltip(
     render_bordered(&lines, theme)
 }
 
-pub(crate) enum TooltipLine {
-    Body(String),
-    Center(String),
-    Sep,
-}
-
-pub(crate) fn render_bordered(lines: &[TooltipLine], theme: &Theme) -> String {
-    let blue = &theme.blue;
-    let dim = &theme.dim;
-
-    let mut max_w = 0usize;
-    for line in lines {
-        let s = match line {
-            TooltipLine::Body(s) | TooltipLine::Center(s) => s.as_str(),
-            TooltipLine::Sep => continue,
-        };
-        let w = visible_width(s);
-        if w > max_w {
-            max_w = w;
-        }
-    }
-    let inner_w = max_w + 1;
-    let border_h = "─".repeat(inner_w);
-    let sep_inner = "─".repeat(inner_w.saturating_sub(2));
-    let sep_line = format!(" <span foreground='{dim}'>{sep_inner}</span>");
-
-    let mut out = String::with_capacity(256 * lines.len());
-    out.push_str(&format!("<span foreground='{blue}'>╭{border_h}╮</span>\n"));
-    for line in lines {
-        let body = match line {
-            TooltipLine::Body(s) => pad_right(s, inner_w),
-            TooltipLine::Center(s) => pad_center(s, inner_w),
-            TooltipLine::Sep => pad_right(&sep_line, inner_w),
-        };
-        out.push_str(&format!(
-            "<span foreground='{blue}'>│</span>{body}<span foreground='{blue}'>│</span>\n"
-        ));
-    }
-    out.push_str(&format!("<span foreground='{blue}'>╰{border_h}╯</span>"));
-    out
-}
-
-pub(crate) fn pad_right(s: &str, inner_w: usize) -> String {
-    let v = visible_width(s);
-    let need = inner_w.saturating_sub(v);
-    format!("{s}{}", " ".repeat(need))
-}
-
-pub(crate) fn pad_center(s: &str, inner_w: usize) -> String {
-    let v = visible_width(s);
-    let total = inner_w.saturating_sub(v);
-    let lp = total / 2;
-    let rp = total - lp;
-    format!("{}{s}{}", " ".repeat(lp), " ".repeat(rp))
-}
 
 impl From<FetchOutcome> for VendorOutcome {
     fn from(o: FetchOutcome) -> Self {

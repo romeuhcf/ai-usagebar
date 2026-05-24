@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 
 use crate::countdown;
 use crate::format::{placeholders, substitute};
-use crate::openrouter::vendor::{TooltipLine, render_bordered};
+use crate::tooltip::{Line as TooltipLine, render_bordered};
 use crate::pacing::{self, PaceSeverity};
 use crate::pango::{self, color_span, escape, severity_color, severity_for};
 use crate::theme::Theme;
@@ -66,6 +66,7 @@ pub fn build_placeholders(
 
     placeholders(vec![
         ("icon", "󱢆".to_string()),
+        ("vendor_short", "gpt".to_string()),
         ("oai_plan", snap.plan.clone()),
         ("oai_session_pct", snap.session.utilization_pct.to_string()),
         (

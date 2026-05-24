@@ -2,20 +2,30 @@
 
 Waybar widget + tabbed TUI for AI plan usage across **Anthropic Claude**, **OpenAI Codex/ChatGPT**, **Z.AI (GLM)**, and **OpenRouter**.
 
-Rust port of [`claudebar`](https://github.com/mryll/claudebar) (drop-in compatible) extended to four vendors. Same minimalist Pango-bordered tooltip design, same Omarchy theme auto-detection, same flock-protected OAuth refresh — but properly tested, modular, and reliable instead of 865 lines of bash.
+Rust port of [`claudebar`](https://github.com/mryll/claudebar) (drop-in compatible) extended to four vendors. Same minimalist Pango-bordered tooltip design, same Omarchy theme auto-detection, same flock-protected OAuth refresh — but tested, modular, and reliable instead of 865 lines of bash.
 
 ## Features
 
-- **Per-vendor Waybar modules** — one widget per vendor; same JSON output shape as claudebar (`{text, tooltip, class}`).
-- **Tabbed TUI** (`ai-usagebar-tui`) — interactive view with Tab/h/l switching, per-tab refresh, auto-refresh every 60s.
-- **Local-testing UX** — `--pretty` mode renders ANSI-colored terminal output; `--watch N` re-renders every N seconds. No need to install into Waybar to iterate.
-- **Drop-in claudebar compatibility** — all the same flags (`--icon`, `--format`, `--tooltip-format`, `--pace-tolerance`, `--format-pace-color`, `--tooltip-pace-pts`, `--color-*`), all the same `{placeholders}`, byte-identical output.
-- **Always exits 0** — Waybar hides modules that don't, so the widget catches every error into a fallback ⚠ JSON.
+- **Per-vendor Waybar modules** — same JSON output shape as claudebar.
+- **Tabbed TUI** (`ai-usagebar-tui`) — interactive view with Tab/h/l switching, per-tab refresh, auto-refresh every 60s. Native ratatui widgets fill the available terminal width with consistent layout across vendors.
+- **Scroll-to-cycle on the bar** — wire `on-scroll-up` / `on-scroll-down` and a single bar item cycles through your enabled vendors.
+- **Config-driven primary vendor** — set `[ui] primary` once; the widget shows that vendor by default and the TUI opens on its tab.
+- **Local-testing UX** — `--pretty` renders ANSI-colored terminal output (auto-detects TTY); `--watch N` re-renders every N seconds.
+- **Drop-in claudebar compatibility** — all the same flags (`--icon`, `--format`, `--tooltip-format`, `--pace-tolerance`, `--format-pace-color`, `--tooltip-pace-pts`, `--color-*`) and `{placeholders}`.
+- **Always exits 0** — Waybar hides modules that don't.
 - **Atomic cache writes + flock** — multi-monitor Waybar instances coexist without API stampedes.
-- **Transient-vs-hard error split** — DNS/timeout failures show a quiet `Loading…`; HTTP 4xx/5xx show actionable HTTP codes in the tooltip.
-- **Live API smoke test suite** — `make smoke` hits the real (undocumented) endpoints and asserts the contract we depend on, surfacing schema drift early.
+- **Transient-vs-hard error split** — DNS/timeout failures show a quiet `Loading…`; HTTP 4xx/5xx surface the code in the tooltip.
+- **Live API smoke test suite** — `make smoke` hits the real (undocumented) endpoints to surface schema drift.
 
 ## Install
+
+### Arch (AUR)
+
+```bash
+yay -S ai-usagebar     # or paru -S, etc.
+```
+
+### From source
 
 ```bash
 cargo build --release
@@ -24,17 +34,72 @@ sudo make install                  # → /usr/local/bin
 make install PREFIX=$HOME/.local   # → ~/.local/bin
 ```
 
+## Authentication
+
+Each vendor authenticates differently. Anthropic and OpenAI use OAuth credentials that their official CLIs already wrote to disk — **no env vars needed.** Z.AI and OpenRouter use API keys, which you can pass via env var OR (for users who don't source secrets in their shell) inline in `config.toml`.
+
+| Vendor | Method | Action required |
+|---|---|---|
+| Anthropic | OAuth, read from `~/.claude/.credentials.json` | Run `claude` once to log in. Token auto-refreshes. |
+| OpenAI | OAuth, read from `~/.codex/auth.json` | Run `codex login` once. Token auto-refreshes. |
+| Z.AI | API key (`ZAI_API_KEY` env or `[zai] api_key` in config) | Set either. |
+| OpenRouter | API key (`OPENROUTER_API_KEY` env or `[openrouter] api_key` in config) | Set either. |
+
+### Credential resolution order (for API-key vendors)
+
+For each API-key vendor, ai-usagebar checks in this order:
+
+1. **Env var named by `api_key_env`** in config (defaults: `ZAI_API_KEY`, `OPENROUTER_API_KEY`). If set + non-empty, used.
+2. **Inline `api_key`** in the same config section.
+3. Otherwise, **error** with a message naming both options.
+
+### Security
+
+- If you put inline `api_key` values in config, `chmod 600 ~/.config/ai-usagebar/config.toml`. The default behavior reads only env vars, which is safer when your config might be world-readable.
+- Don't commit your config dir if you check it into dotfiles unless you've redacted `api_key` lines.
+- OAuth credential files (`~/.claude/.credentials.json`, `~/.codex/auth.json`) are managed by their respective CLIs and already chmod-protected.
+
+## Configuration
+
+`~/.config/ai-usagebar/config.toml` (optional — defaults enable all four vendors). Full example:
+
+```toml
+[ui]
+# Which vendor the widget shows when --vendor is omitted, AND which tab
+# is selected when the TUI opens. Defaults to anthropic when not set.
+# primary = "anthropic"   # anthropic | openai | zai | openrouter
+
+[anthropic]
+enabled = true
+# credentials_path = "/home/you/.claude/.credentials.json"
+
+[openai]
+enabled = true
+# codex_auth_path = "/home/you/.codex/auth.json"
+
+[zai]
+enabled = true
+api_key_env = "ZAI_API_KEY"
+# api_key = "..."          # used if ZAI_API_KEY is unset; chmod 600 the file!
+# plan_tier = "lite"       # lite | pro | max — display-only
+
+[openrouter]
+enabled = true
+api_key_env = "OPENROUTER_API_KEY"
+# api_key = "sk-or-v1-..."
+```
+
 ## Quick start
 
 ```bash
 # Local testing — auto-detects TTY and renders human-readable output.
-ai-usagebar --vendor anthropic
+ai-usagebar                        # uses [ui] primary (defaults to anthropic)
 ai-usagebar --vendor openai
 ai-usagebar --vendor zai
 ai-usagebar --vendor openrouter
 
 # Force Waybar JSON (e.g. piping into jq).
-ai-usagebar --vendor anthropic --json
+ai-usagebar --json
 
 # Live preview while iterating on --format / --tooltip-format.
 ai-usagebar --vendor openrouter --watch 5
@@ -45,21 +110,40 @@ ai-usagebar-tui
 
 ## Waybar config
 
-Each vendor is its own module — gives you per-vendor icon, colors, and on-click action:
+### Single module, scroll-to-cycle (recommended)
+
+One bar item that you can scroll through to cycle vendors. The TUI on-click shows them all:
 
 ```jsonc
-"modules-right": [
-    "custom/claude",
-    "custom/openai",
-    "custom/openrouter",
-    "custom/zai"
-],
+"modules-right": ["custom/aibar", ...],
+
+"custom/aibar": {
+    "exec": "ai-usagebar --format '{vendor_short} {session_pct}% · {session_reset}'",
+    "return-type": "json",
+    "interval": 300,
+    "signal": 13,
+    "tooltip": true,
+    "on-click": "ai-usagebar-tui",
+    "on-scroll-up":   "ai-usagebar --cycle-next",
+    "on-scroll-down": "ai-usagebar --cycle-prev"
+}
+```
+
+The `{vendor_short}` placeholder always expands to a 3-letter vendor ID (`cld` / `gpt` / `zai` / `opr`) so the bar text tells you which vendor is currently cycled. The other usage placeholders (`{session_pct}` for Anthropic, `{oai_session_pct}` for OpenAI, etc.) are vendor-specific — to use one format string that works for all four cycled vendors, prefer the generic versions where available (currently `{session_pct}` works for Anthropic only; the other vendors expose their own `{oai_*}` / `{zai_*}` / `{or_*}` families that fall through to empty for vendors that don't define them).
+
+`signal: 13` lets the scroll-cycle commands refresh the bar instantly (via `SIGRTMIN+13`) instead of waiting for the next 300s interval.
+
+### Per-vendor modules
+
+If you'd rather see them all at once:
+
+```jsonc
+"modules-right": ["custom/claude", "custom/openai", "custom/openrouter", "custom/zai"],
 
 "custom/claude": {
     "exec": "ai-usagebar --vendor anthropic --icon '󰚩'",
     "return-type": "json",
     "interval": 300,
-    "signal": 13,
     "tooltip": true,
     "on-click": "ai-usagebar-tui"
 },
@@ -67,8 +151,7 @@ Each vendor is its own module — gives you per-vendor icon, colors, and on-clic
     "exec": "ai-usagebar --vendor openai --icon '󱢆'",
     "return-type": "json",
     "interval": 300,
-    "tooltip": true,
-    "on-click": "ai-usagebar-tui"
+    "tooltip": true
 },
 "custom/openrouter": {
     "exec": "ai-usagebar --vendor openrouter --icon '󱙺' --format '{or_balance} · {or_used_today}'",
@@ -86,46 +169,34 @@ Each vendor is its own module — gives you per-vendor icon, colors, and on-clic
 
 > Why 300s? The Anthropic and OpenAI Codex endpoints are undocumented and rate-limit aggressively below ~300s. The cache TTL is 60s so multi-monitor instances coexist, but Waybar's polling interval should stay at 300s.
 
-## Configuration
+## Hyprland: float the TUI window
 
-`~/.config/ai-usagebar/config.toml` (optional — defaults enable all four vendors):
+By default Hyprland tiles the TUI. To make `ai-usagebar-tui` open as a floating window, add this to `~/.config/hypr/hyprland.conf` (or any sourced `.conf`):
 
-```toml
-[anthropic]
-enabled = true
-# credentials_path = "/home/you/.claude/.credentials.json"  # override
-
-[openai]
-enabled = true
-# codex_auth_path = "/home/you/.codex/auth.json"  # override
-admin_key_env = "OPENAI_ADMIN_KEY"
-
-[zai]
-enabled = true
-api_key_env = "ZAI_API_KEY"
-# plan_tier = "lite"   # lite | pro | max — display-only
-
-[openrouter]
-enabled = true
-api_key_env = "OPENROUTER_API_KEY"
+```ini
+# Float ai-usagebar-tui when launched via omarchy-launch-tui (which sets the
+# app-id from the binary basename).
+windowrulev2 = float, class:^(org\.omarchy\.ai-usagebar-tui)$
+windowrulev2 = size 80% 70%, class:^(org\.omarchy\.ai-usagebar-tui)$
+windowrulev2 = center, class:^(org\.omarchy\.ai-usagebar-tui)$
 ```
 
-API keys are read from env vars (export them in `~/.config/zsh/secrets`, `~/.bashrc`, or similar). The Claude and OpenAI vendors use OAuth from disk (`~/.claude/.credentials.json` and `~/.codex/auth.json`) — no env var needed; just `claude` / `codex login` once.
+Then `hyprctl reload` (no logout needed). If you launch the TUI differently (`kitty -e ai-usagebar-tui`, etc.) replace the `class` regex with whatever your terminal reports — `hyprctl clients` will show it.
 
 ## Vendor support matrix
 
-| Vendor | Endpoint | Auth | What you see |
-|---|---|---|---|
-| **Anthropic** | `api.anthropic.com/api/oauth/usage` (undocumented) | OAuth from `~/.claude/.credentials.json`, auto-refreshes | Session (5h), Weekly (7d), Sonnet (7d), Extra usage $ |
-| **OpenAI** | `chatgpt.com/backend-api/wham/usage` (undocumented; used by official `codex` CLI) | OAuth from `~/.codex/auth.json`, auto-refreshes via `auth.openai.com/oauth/token` | Codex 5h, Codex weekly, Code-review weekly, Credits |
-| **Z.AI** | `api.z.ai/api/monitor/usage/quota/limit` (undocumented) | `ZAI_API_KEY` env var **without `Bearer` prefix** | Session 5h, Weekly 7d, MCP tools monthly |
-| **OpenRouter** | `openrouter.ai/api/v1/{credits,key}` (documented) | `OPENROUTER_API_KEY` env var | Balance, today/week/month spend, free vs paid tier |
+| Vendor | Endpoint | What you see |
+|---|---|---|
+| **Anthropic** | `api.anthropic.com/api/oauth/usage` (undocumented) | Session (5h), Weekly (7d), Sonnet (7d), Extra usage $ |
+| **OpenAI** | `chatgpt.com/backend-api/wham/usage` (undocumented; used by official `codex` CLI) | Codex 5h, Codex weekly, Code-review weekly, Credits |
+| **Z.AI** | `api.z.ai/api/monitor/usage/quota/limit` (undocumented) | Session 5h, Weekly 7d, MCP tools monthly |
+| **OpenRouter** | `openrouter.ai/api/v1/{credits,key}` (documented) | Balance, today/week/month spend, free vs paid tier |
 
 ### Endpoint stability
 
 Three of the four endpoints are undocumented. The Anthropic and OpenAI endpoints are used by their respective official CLIs (`claude` and `codex`) — disappearing them would break those tools too, so they're more durable than scraped web endpoints. Z.AI's monitor endpoint is reverse-engineered from a third-party plugin; treat it as the most fragile.
 
-When an endpoint drifts, **run `make smoke`** — the live API tests check the exact fields we depend on and produce a precise failure pointing at what changed. Paste the failure back into Claude Code and we can update the affected `types.rs` mechanically.
+When an endpoint drifts, **run `make smoke`** — the live API tests check the exact fields we depend on and produce a precise failure pointing at what changed. Paste the failure back into Claude Code and the affected `types.rs` can be updated mechanically.
 
 ## Format placeholders
 
@@ -155,25 +226,24 @@ When an endpoint drifts, **run `make smoke`** — the live API tests check the e
 ## Local development
 
 ```bash
-# Iteration loop
-ai-usagebar --vendor anthropic --watch 5
-
-# Custom format preview
+ai-usagebar --watch 5                              # iterate on --format live
 ai-usagebar --vendor openrouter --format '{or_balance} · today {or_used_today}'
 
-# Custom tooltip
-ai-usagebar --vendor zai --tooltip-format 'session: {zai_session_pct}% / weekly: {zai_weekly_pct}%'
-
-# Unit + integration tests
-make test
-
-# Live API smoke (uses real creds — needs creds sourced)
-source ~/.config/zsh/secrets
-make smoke
-
-# Lint
-make clippy
+make test                                          # unit + integration
+source ~/.config/zsh/secrets                       # only needed for live smoke
+make smoke                                         # live API drift detection
+make clippy                                        # cargo clippy -D warnings
 ```
+
+## TUI controls
+
+- `Tab` / `l` / `→` — next tab
+- `Shift+Tab` / `h` / `←` — previous tab
+- `r` — refresh active tab
+- `R` — refresh all tabs
+- `q` / `Esc` / `Ctrl-C` — quit
+
+Auto-refresh runs every 60 seconds in the background.
 
 ## Theming
 
