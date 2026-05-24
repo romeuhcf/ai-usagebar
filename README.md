@@ -178,17 +178,19 @@ If you'd rather see them all at once:
 
 ## Hyprland: float the TUI window
 
-By default Hyprland tiles the TUI. To make `ai-usagebar-tui` open as a floating window, add this to `~/.config/hypr/hyprland.conf` (or any sourced `.conf`):
+By default Hyprland tiles the TUI. To make `ai-usagebar-tui` open as a centered floating window, add this to `~/.config/hypr/hyprland.conf` (or any sourced `.conf`, e.g. `looknfeel.conf` if you have one):
 
 ```ini
-# Float ai-usagebar-tui when launched via omarchy-launch-tui (which sets the
-# app-id from the binary basename).
-windowrulev2 = float, class:^(org\.omarchy\.ai-usagebar-tui)$
-windowrulev2 = size 80% 70%, class:^(org\.omarchy\.ai-usagebar-tui)$
-windowrulev2 = center, class:^(org\.omarchy\.ai-usagebar-tui)$
+# ai-usagebar TUI — float instead of tiling. omarchy-launch-tui sets the
+# app-id from the binary basename, so the class is org.omarchy.ai-usagebar-tui.
+windowrule = float on, match:class ^(org\.omarchy\.ai-usagebar-tui)$
+windowrule = size 80% 70%, match:class ^(org\.omarchy\.ai-usagebar-tui)$
+windowrule = center on, match:class ^(org\.omarchy\.ai-usagebar-tui)$
 ```
 
-Then `hyprctl reload` (no logout needed). If you launch the TUI differently (`kitty -e ai-usagebar-tui`, etc.) replace the `class` regex with whatever your terminal reports — `hyprctl clients` will show it.
+Then `hyprctl reload` (no logout needed). If you launch the TUI differently (e.g. `kitty -e ai-usagebar-tui`) replace the class regex with whatever `hyprctl clients` reports for your terminal.
+
+> Hyprland 0.46+ uses the unified `windowrule` keyword with `match:…` filters. The older `windowrulev2 = …, class:…` syntax still works on legacy Hyprland but is deprecated — use the form above on current Omarchy / Hyprland releases.
 
 ## Vendor support matrix
 
