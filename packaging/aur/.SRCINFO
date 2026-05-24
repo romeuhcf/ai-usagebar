@@ -1,0 +1,19 @@
+pkgbase = ai-usagebar
+	pkgdesc = Waybar widget + TUI for AI plan usage across Anthropic, OpenAI, Z.AI, and OpenRouter
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/akitaonrails/ai-usagebar
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = git
+	makedepends = nasm
+	depends = gcc-libs
+	optdepends = waybar: status bar that hosts the widget
+	optdepends = libnotify: desktop notifications on hard auth failures
+	options = !lto
+	source = ai-usagebar-0.1.0.tar.gz::https://github.com/akitaonrails/ai-usagebar/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = 17f468e9508d8bd4e25fc8638f7e1a32d7a9ca2a6ffe3a5946549fa1be186786
+
+pkgname = ai-usagebar
