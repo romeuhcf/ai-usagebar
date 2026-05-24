@@ -23,7 +23,7 @@ conflicts=("$_pkgname" "$_pkgname-debug")
 # collide with the source variant's `ai-usagebar-debug` package.
 options=('!strip' '!debug')
 source=("$_pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-linux-x86_64.tar.gz")
-sha256sums=('SKIP')  # pinned after CI uploads the v$pkgver release tarball
+sha256sums=('25e5fb9a0ebb6140244fe3f8972b31b83c0bcd6692d82d7bc6c095b7ffd290a5')
 
 package() {
     install -Dm0755 -t "$pkgdir/usr/bin/"                "ai-usagebar"
