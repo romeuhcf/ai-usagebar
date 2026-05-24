@@ -67,6 +67,14 @@ pub fn build_placeholders(
     placeholders(vec![
         ("icon", "󱢆".to_string()),
         ("vendor_short", "gpt".to_string()),
+        // Cross-vendor aliases — same names work across all vendors so a
+        // single `--format '{vendor_short} {session_pct}% · {session_reset}'`
+        // renders correctly during scroll-cycle.
+        ("session_pct", snap.session.utilization_pct.to_string()),
+        ("session_reset", countdown::format(snap.session.resets_at, now)),
+        ("weekly_pct", snap.weekly.utilization_pct.to_string()),
+        ("weekly_reset", countdown::format(snap.weekly.resets_at, now)),
+        ("plan", snap.plan.clone()),
         ("oai_plan", snap.plan.clone()),
         ("oai_session_pct", snap.session.utilization_pct.to_string()),
         (

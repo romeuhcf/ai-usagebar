@@ -31,6 +31,18 @@ pub fn build_placeholders(
     placeholders(vec![
         ("icon", "󰚩".to_string()),
         ("vendor_short", "zai".to_string()),
+        // Cross-vendor aliases for scroll-cycle friendly formats.
+        ("session_pct", session_pct.to_string()),
+        (
+            "session_reset",
+            countdown::format(window_reset(&snap.session), now),
+        ),
+        ("weekly_pct", weekly_pct.to_string()),
+        (
+            "weekly_reset",
+            countdown::format(window_reset(&snap.weekly), now),
+        ),
+        ("plan", snap.plan.clone()),
         ("zai_plan", snap.plan.clone()),
         ("zai_session_pct", session_pct.to_string()),
         (

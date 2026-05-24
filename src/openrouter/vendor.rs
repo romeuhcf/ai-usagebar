@@ -24,6 +24,13 @@ pub fn build_placeholders(snap: &OpenRouterSnapshot, _theme: &Theme) -> HashMap<
     placeholders(vec![
         ("icon", "󱙺".to_string()),
         ("vendor_short", "opr".to_string()),
+        // Cross-vendor aliases — for OpenRouter the "session" concept maps
+        // to "credit consumed %", and there's no reset time so we render "—".
+        ("session_pct", snap.consumed_pct().to_string()),
+        ("session_reset", "—".to_string()),
+        ("weekly_pct", snap.consumed_pct().to_string()),
+        ("weekly_reset", "—".to_string()),
+        ("plan", snap.label.clone()),
         ("or_label", snap.label.clone()),
         ("or_balance", format_money(snap.balance())),
         ("or_total", format_money(snap.total_credits)),
