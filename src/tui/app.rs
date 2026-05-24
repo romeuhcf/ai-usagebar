@@ -39,6 +39,8 @@ pub struct App {
     pub theme: Theme,
     pub last_refresh: chrono::DateTime<chrono::Utc>,
     pub quit: bool,
+    /// When `Some`, the Settings overlay is open and consuming key events.
+    pub settings: Option<crate::tui::settings::SettingsState>,
 }
 
 impl App {
@@ -51,6 +53,7 @@ impl App {
             theme: Theme::default().merged_with_omarchy(),
             last_refresh: Utc::now(),
             quit: false,
+            settings: None,
         }
     }
 

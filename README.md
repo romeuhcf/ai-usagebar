@@ -246,9 +246,27 @@ make clippy                                        # cargo clippy -D warnings
 - `Shift+Tab` / `h` / `←` — previous tab
 - `r` — refresh active tab
 - `R` — refresh all tabs
+- `s` — open Settings overlay (primary vendor + API keys)
 - `q` / `Esc` / `Ctrl-C` — quit
 
 Auto-refresh runs every 60 seconds in the background.
+
+### Settings overlay
+
+Press `s` while the TUI is open. The overlay lets you:
+
+- Pick the **primary vendor** that the widget defaults to and that the TUI selects on startup. Use `←` / `→` to cycle.
+- Enter your **Z.AI API key** and **OpenRouter API key** inline. Keys are masked as you type; press `Ctrl-V` to reveal/hide. Env vars (`ZAI_API_KEY`, `OPENROUTER_API_KEY`) still win at runtime if they're set — the inline key is the fallback.
+
+Key bindings inside the overlay:
+
+- `Tab` / `↑↓` — move between fields
+- `←` / `→` — cycle primary-vendor selection (only on the vendor field)
+- `Ctrl-V` — toggle key visibility on the focused key field
+- `Ctrl-S` — save and close
+- `Esc` — discard and close
+
+Save writes to `~/.config/ai-usagebar/config.toml` via `toml_edit` so your existing comments and unrelated fields are preserved. The file is automatically `chmod 600`ed on save, so inline keys aren't world-readable.
 
 ## Theming
 

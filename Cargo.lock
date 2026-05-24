@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ai-usagebar"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -33,6 +33,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "toml",
+ "toml_edit",
 ]
 
 [[package]]

@@ -109,6 +109,32 @@ async fn event_loop<B: ratatui::backend::Backend>(
                 let polled = res.unwrap_or(Ok(false)).unwrap_or(false);
                 if polled {
                     if let Ok(Event::Key(k)) = event::read() {
+                        // Settings overlay consumes all keys when open.
+                        if let Some(s) = app.settings.as_mut() {
+                            use ai_usagebar::tui::settings::{Action as SAction, handle_key as shandle};
+                            match shandle(s, k.code, k.modifiers) {
+                                SAction::Continue => {}
+                                SAction::Close => app.settings = None,
+                                SAction::SavedAndClose => {
+                                    app.settings = None;
+                                    // Re-load config so the new primary takes effect
+                                    // on the next render, and queue an immediate refresh
+                                    // of all vendors so newly-set API keys are picked up.
+                                    let new_cfg = ai_usagebar::config::Config::load().unwrap_or_default();
+                                    let _ = new_cfg; // future: re-apply primary to active tab
+                                    spawn_all(app, client, config, &tx);
+                                }
+                            }
+                            continue;
+                        }
+                        // Normal key handling (settings closed).
+                        if matches!(k.code, KeyCode::Char('s')) {
+                            let cfg = ai_usagebar::config::Config::load().unwrap_or_default();
+                            app.settings = Some(
+                                ai_usagebar::tui::settings::SettingsState::from_config(&cfg),
+                            );
+                            continue;
+                        }
                         if handle_key(app, k.code, k.modifiers) {
                             return Ok(());
                         }

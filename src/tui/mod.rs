@@ -2,4 +2,5 @@
 
 pub mod app;
 pub mod panels;
+pub mod settings;
 pub mod view;

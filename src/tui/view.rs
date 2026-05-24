@@ -23,6 +23,11 @@ pub fn draw(f: &mut Frame, app: &App) {
     draw_tabs(f, app, chunks[0]);
     draw_body(f, app, chunks[1]);
     draw_footer(f, app, chunks[2]);
+
+    // Settings overlay sits on top — rendered last so it covers everything.
+    if let Some(s) = &app.settings {
+        crate::tui::settings::render(f, f.area(), s, &app.theme);
+    }
 }
 
 fn vendor_label(id: VendorId) -> &'static str {
@@ -101,6 +106,8 @@ fn draw_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Span::styled(" switch · ", Style::default().fg(dim_color)),
         Span::styled("[r]", Style::default().fg(accent(&app.theme))),
         Span::styled(" refresh · ", Style::default().fg(dim_color)),
+        Span::styled("[s]", Style::default().fg(accent(&app.theme))),
+        Span::styled(" settings · ", Style::default().fg(dim_color)),
         Span::styled("[q]", Style::default().fg(accent(&app.theme))),
         Span::styled(" quit", Style::default().fg(dim_color)),
         Span::styled(

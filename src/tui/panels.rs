@@ -189,6 +189,7 @@ fn zai_sections(s: &crate::usage::ZaiSnapshot, now: DateTime<Utc>) -> Vec<Sectio
 fn openrouter_sections(s: &crate::usage::OpenRouterSnapshot) -> Vec<Section> {
     let mut v = vec![Section::Title(s.label.clone())];
     let pct = s.consumed_pct().clamp(0, 100) as u16;
+    v.push(Section::Spacer);
     v.push(Section::Metric {
         label: "Credit balance".into(),
         pct,
@@ -199,6 +200,7 @@ fn openrouter_sections(s: &crate::usage::OpenRouterSnapshot) -> Vec<Section> {
             s.total_usage, s.total_credits
         ),
     });
+    v.push(Section::Spacer);
     v.push(Section::Block {
         label: "Usage by period".into(),
         body: vec![format!(
@@ -207,11 +209,13 @@ fn openrouter_sections(s: &crate::usage::OpenRouterSnapshot) -> Vec<Section> {
         )],
     });
     if let (Some(limit), Some(rem)) = (s.limit, s.limit_remaining) {
+        v.push(Section::Spacer);
         v.push(Section::Block {
             label: "Per-key limit".into(),
             body: vec![format!("${:.2} of ${:.2} remaining", rem, limit)],
         });
     }
+    v.push(Section::Spacer);
     v.push(Section::Block {
         label: "Tier".into(),
         body: vec![if s.is_free_tier {
@@ -260,17 +264,41 @@ fn push_window(
 
 /// Render the given sections into `area`. Lays them out vertically; metric
 /// rows take 2 lines (label+gauge / footnote), text and spacer rows take 1.
+///
+/// The trailing "Updated …" footer is detected (the last `Text` section)
+/// and pinned to the bottom of the area, with the slack absorbed *between*
+/// content and footer. This way shorter vendor panels (OpenRouter, Z.AI)
+/// don't leave a giant gap below the footer.
 pub fn render(f: &mut Frame, area: Rect, theme: &Theme, sections: &[Section]) {
-    let constraints: Vec<Constraint> = sections.iter().map(section_height).collect();
-    // Add a flexible bottom spacer so content hugs the top.
-    let mut all_constraints = constraints.clone();
-    all_constraints.push(Constraint::Min(0));
+    if sections.is_empty() {
+        return;
+    }
+    // Heuristic: if the last section is a Text starting with "  Updated",
+    // pin it to the bottom. Otherwise just lay everything out top-down.
+    let pin_last =
+        matches!(sections.last(), Some(Section::Text { value, .. }) if value.contains("Updated"));
+
+    let body_end = if pin_last { sections.len() - 1 } else { sections.len() };
+    let mut constraints: Vec<Constraint> =
+        sections[..body_end].iter().map(section_height).collect();
+
+    if pin_last {
+        constraints.push(Constraint::Min(0)); // slack between body and footer
+        constraints.push(section_height(sections.last().unwrap()));
+    } else {
+        constraints.push(Constraint::Min(0));
+    }
+
     let chunks = Layout::default()
         .direction(ratatui::layout::Direction::Vertical)
-        .constraints(all_constraints)
+        .constraints(constraints)
         .split(area);
-    for (i, s) in sections.iter().enumerate() {
+
+    for (i, s) in sections[..body_end].iter().enumerate() {
         render_section(f, chunks[i], theme, s);
+    }
+    if pin_last {
+        render_section(f, chunks[chunks.len() - 1], theme, sections.last().unwrap());
     }
 }
 
