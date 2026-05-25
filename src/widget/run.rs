@@ -37,22 +37,31 @@ pub async fn run(cli: Cli) -> i32 {
 }
 
 /// Cycle to the next/prev enabled vendor and signal waybar to refresh.
-/// Always exits 0 — Waybar swallows non-zero exits anyway.
+/// Includes named Anthropic accounts (from `[[anthropic.extra]]`) as distinct
+/// cycle positions. Always exits 0 — Waybar swallows non-zero exits anyway.
 async fn run_cycle(cli: &Cli) -> i32 {
     let config = Config::load().unwrap_or_default();
-    let enabled = config.enabled_vendors();
-    if enabled.is_empty() {
+
+    // Build the full ordered key list: named Anthropic accounts first, then
+    // other standard vendors in canonical order.
+    let mut all_keys: Vec<String> = config.anthropic.enabled_keys();
+    for id in [
+        crate::vendor::VendorId::Openai,
+        crate::vendor::VendorId::Zai,
+        crate::vendor::VendorId::Openrouter,
+    ] {
+        if config.is_enabled(id) {
+            all_keys.push(id.slug().to_string());
+        }
+    }
+
+    if all_keys.is_empty() {
         return 0;
     }
-    // Starting point: current persisted vendor, else config.primary, else
-    // anthropic. resolved_vendor() encodes that precedence, minus the
-    // `cli.vendor` override (cycle commands ignore --vendor on purpose).
-    let start = match config.ui.primary {
-        Some(id) if enabled.contains(&id) => id,
-        _ => enabled[0],
-    };
+
+    let start_key = all_keys[0].clone();
     let delta = if cli.cycle_next { 1 } else { -1 };
-    let _ = crate::active::cycle(&enabled, start, delta);
+    let _ = crate::active::cycle_mixed(&all_keys, &start_key, delta);
 
     // Refresh the bar immediately. The Waybar module's `signal: 13` setting
     // means SIGRTMIN+13 re-runs the exec. SIGRTMIN is libc-dependent; the
@@ -101,7 +110,7 @@ async fn build_output(cli: &Cli) -> Result<WaybarOutput> {
         )));
     }
     match vendor {
-        Vendor::Anthropic => anthropic_output(cli).await,
+        Vendor::Anthropic => anthropic_output(cli, &config).await,
         Vendor::Openrouter => openrouter_output(cli, &config).await,
         Vendor::Openai => openai_output(cli, &config).await,
         Vendor::Zai => zai_output(cli, &config).await,
@@ -210,13 +219,10 @@ async fn openrouter_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
     ))
 }
 
-async fn anthropic_output(cli: &Cli) -> Result<WaybarOutput> {
+async fn anthropic_output(cli: &Cli, config: &Config) -> Result<WaybarOutput> {
     let client = http_client()?;
-    let cache = vendor_cache(cli, "anthropic")?;
-    let creds_path = match cli.creds_path.as_deref() {
-        Some(p) => p.to_path_buf(),
-        None => anthropic::creds::default_path()?,
-    };
+    let (creds_path, cache_key) = resolve_anthropic_account(cli, config)?;
+    let cache = vendor_cache(cli, &cache_key)?;
     let endpoints = anthropic::fetch::Endpoints::default();
     let outcome = match anthropic::fetch_snapshot(
         &client,
@@ -236,8 +242,52 @@ async fn anthropic_output(cli: &Cli) -> Result<WaybarOutput> {
     };
 
     let theme = theme_from_cli(cli);
-
     Ok(render_with_theme(&outcome, &theme, cli))
+}
+
+/// Resolve which Anthropic account to use, returning (credentials_path, cache_key).
+///
+/// Precedence:
+///   1. `--creds-path` CLI flag (debug/test)
+///   2. Named account matching the active vendor key in state file
+///   3. Primary `[anthropic]` configured credentials path
+///   4. Default `~/.claude/.credentials.json`
+fn resolve_anthropic_account(cli: &Cli, config: &Config) -> Result<(std::path::PathBuf, String)> {
+    if let Some(p) = cli.creds_path.as_deref() {
+        return Ok((p.to_path_buf(), "anthropic".to_string()));
+    }
+
+    if let Some(active_key) = crate::active::read_raw() {
+        // Primary named account?
+        if config.anthropic.vendor.as_deref() == Some(&*active_key) {
+            let path = expand_home_opt(config.anthropic.credentials_path.as_deref())
+                .unwrap_or_else(|| anthropic::creds::default_path().unwrap_or_default());
+            return Ok((path, format!("anthropic-{active_key}")));
+        }
+        // Extra named account?
+        if let Some(extra) = config.anthropic.find_extra(&active_key) {
+            let path = expand_home_opt(extra.credentials_path.as_deref())
+                .unwrap_or_else(|| anthropic::creds::default_path().unwrap_or_default());
+            return Ok((path, format!("anthropic-{active_key}")));
+        }
+    }
+
+    // Default: primary configured path (or built-in default).
+    let path = expand_home_opt(config.anthropic.credentials_path.as_deref())
+        .unwrap_or_else(|| anthropic::creds::default_path().unwrap_or_default());
+    Ok((path, "anthropic".to_string()))
+}
+
+/// Expand a leading `~/` to `$HOME/`. Returns `None` when `path` is `None`.
+fn expand_home_opt(path: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let p = path?;
+    let s = p.to_str()?;
+    if let Some(rest) = s.strip_prefix("~/") {
+        let home = std::env::var_os("HOME")?;
+        Some(std::path::PathBuf::from(home).join(rest))
+    } else {
+        Some(p.to_path_buf())
+    }
 }
 
 fn render_with_theme(outcome: &FetchOutcome, theme: &Theme, cli: &Cli) -> WaybarOutput {

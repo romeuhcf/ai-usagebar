@@ -30,10 +30,25 @@ pub fn read() -> Option<VendorId> {
     parse_slug(raw.trim())
 }
 
+/// Read the raw persisted key string, if any. Unlike `read()`, this does not
+/// attempt to parse the value into a `VendorId` — useful for named accounts.
+pub fn read_raw() -> Option<String> {
+    let path = state_path().ok()?;
+    let raw = fs::read_to_string(&path).ok()?;
+    let s = raw.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
 /// Persist `vendor` as the active one. Atomic.
 pub fn write(vendor: VendorId) -> Result<()> {
     let path = state_path()?;
     atomic_write(&path, vendor.slug().as_bytes())
+}
+
+/// Persist an arbitrary key string as the active vendor. Atomic.
+pub fn write_str(key: &str) -> Result<()> {
+    let path = state_path()?;
+    atomic_write(&path, key.as_bytes())
 }
 
 /// Cycle the active vendor by `delta` positions through `enabled` (which
@@ -52,7 +67,25 @@ pub fn cycle(enabled: &[VendorId], start: VendorId, delta: i32) -> Result<Vendor
     Ok(next)
 }
 
-fn parse_slug(s: &str) -> Option<VendorId> {
+/// Cycle through a mixed list of arbitrary vendor key strings (named anthropic
+/// accounts and standard vendor slugs). Wraps. Persists the new active key and
+/// returns it.
+pub fn cycle_mixed(all_keys: &[String], start_key: &str, delta: i32) -> Result<String> {
+    if all_keys.is_empty() {
+        return Err(AppError::Other("no vendors to cycle".into()));
+    }
+    let current = read_raw()
+        .filter(|k| all_keys.contains(k))
+        .unwrap_or_else(|| start_key.to_string());
+    let cur_idx = all_keys.iter().position(|k| k == &current).unwrap_or(0);
+    let n = all_keys.len() as i32;
+    let next_idx = ((cur_idx as i32 + delta).rem_euclid(n)) as usize;
+    let next = all_keys[next_idx].clone();
+    write_str(&next)?;
+    Ok(next)
+}
+
+pub fn parse_slug(s: &str) -> Option<VendorId> {
     match s {
         "anthropic" => Some(VendorId::Anthropic),
         "openai" => Some(VendorId::Openai),

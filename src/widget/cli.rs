@@ -131,15 +131,23 @@ impl Cli {
     /// Resolve the vendor with full precedence:
     ///   1. explicit `--vendor` (highest)
     ///   2. persisted scroll-cycle state (`~/.cache/ai-usagebar/active_vendor`)
+    ///      — handles both standard slugs and named Anthropic account keys
     ///   3. `[ui] primary` from config
     ///   4. anthropic (lowest)
     pub fn resolved_vendor(&self, config: &crate::config::Config) -> Vendor {
         if let Some(v) = self.vendor {
             return v;
         }
-        if let Some(id) = crate::active::read() {
-            if config.is_enabled(id) {
-                return id_to_vendor(id);
+        if let Some(raw_key) = crate::active::read_raw() {
+            // Named Anthropic account (primary or extra)?
+            if config.anthropic.enabled_keys().contains(&raw_key) {
+                return Vendor::Anthropic;
+            }
+            // Standard vendor slug?
+            if let Some(id) = crate::active::parse_slug(&raw_key) {
+                if config.is_enabled(id) {
+                    return id_to_vendor(id);
+                }
             }
         }
         match config.ui.primary {

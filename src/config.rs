@@ -45,6 +45,52 @@ pub struct AnthropicConfig {
     pub enabled: bool,
     /// Override the credentials file path (defaults to `~/.claude/.credentials.json`).
     pub credentials_path: Option<PathBuf>,
+    /// Display name / cycle key for this account. Defaults to `"anthropic"`.
+    pub vendor: Option<String>,
+    /// Additional Anthropic accounts with their own credential paths.
+    #[serde(default)]
+    pub extra: Vec<AnthropicExtraAccount>,
+}
+
+/// An additional named Anthropic account listed under `[[anthropic.extra]]`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnthropicExtraAccount {
+    /// Unique name used as cycle key and in the active-vendor state file.
+    pub vendor: String,
+    /// Path to this account's `.credentials.json` (supports `~/…`).
+    pub credentials_path: Option<PathBuf>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl AnthropicConfig {
+    /// The cycle key for the primary Anthropic account.
+    pub fn primary_key(&self) -> &str {
+        self.vendor.as_deref().unwrap_or("anthropic")
+    }
+
+    /// Find an extra account by vendor name.
+    pub fn find_extra(&self, name: &str) -> Option<&AnthropicExtraAccount> {
+        self.extra.iter().find(|a| a.vendor == name)
+    }
+
+    /// All enabled vendor keys for this config (primary + extras), in order.
+    pub fn enabled_keys(&self) -> Vec<String> {
+        let mut keys = Vec::new();
+        if self.enabled {
+            keys.push(self.primary_key().to_string());
+        }
+        for extra in &self.extra {
+            if extra.enabled {
+                keys.push(extra.vendor.clone());
+            }
+        }
+        keys
+    }
 }
 
 impl Default for AnthropicConfig {
@@ -52,6 +98,8 @@ impl Default for AnthropicConfig {
         Self {
             enabled: true,
             credentials_path: None,
+            vendor: None,
+            extra: Vec::new(),
         }
     }
 }
